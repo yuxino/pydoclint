@@ -3,12 +3,28 @@
 ## [Unreleased]
 
 - Fixed
+  - A default value alone (`value=3` in the signature, `value : , default=3` in
+    the docstring) is no longer treated as a type hint, so it no longer hides
+    `DOC106`/`DOC107`/`DOC109`/`DOC110` or causes `DOC108`/`DOC111` (#313)
+  - Arguments documented in a different order no longer get `DOC105` (or
+    `DOC605` for class attributes) for their type hints when type hints aren't
+    compared (a type-hint option is off, or the docstring is in another style),
+    just as in the right order (#325)
+  - Arguments documented in a different order, with type hints that are equal
+    but written differently (such as `Dict[str, int]` and `Dict[str,int]`), no
+    longer get an empty `DOC105` next to `DOC104` (#339)
   - Underlined text in doctest output no longer triggers `DOC001` as an
     unsupported NumPy docstring section (#300)
+- Changed
+  - With `--check-arg-defaults=True`, documented defaults of function arguments
+    are compared with the signature even when a type-hint option is off, and
+    mismatches get `DOC105` (#313)
 - Maintenance
   - Renamed the internal `actualArgs` to `codeArgs` (and the helper functions,
     parameters and tests that use it), so that it pairs with `docArgs`. No
     behavior changes (#314)
+  - Pinned `tox<4.67.14` in CI, because tox 4.67.14 breaks `tox-gh-actions`
+    3.5.0 and every CI job on Python 3.11+ failed at startup
 
 ## [0.12.0] - 2026-10-28
 

@@ -8,6 +8,9 @@ if TYPE_CHECKING:
 
 from pydoclint.utils.edge_case_error import EdgeCaseError
 from pydoclint.utils.generic import (
+    defaultValuesEqual,
+    getDefaultValue,
+    isDefaultOnly,
     specialEqual,
     stripCommentsFromTypeHints,
     stripQuotes,
@@ -60,15 +63,28 @@ class Arg:
         return self < other or self == other
 
     def __hash__(self) -> int:
-        return hash((self.name, stripQuotes(self.typeHint)))
+        # What: the hash uses only the arg name, not the type hint.
+        #
+        # Why: Python requires equal objects to have equal hashes, because a
+        # set or dict first picks candidates by hash and only then compares
+        # them with __eq__. Our __eq__ normalizes the type hints before
+        # comparing, so `Dict[str, int]` and `Dict[str,int]` are equal. If the
+        # hash used the type hint text, these two equal args would get
+        # different hashes, and a set would never compare them (see #339).
+        # Equal args always have the same name, so hashing the name alone is
+        # always safe, and __eq__ still checks the type hints.
+        return hash(self.name)
 
     def nameEquals(self, other: Arg) -> bool:
         """More lenient equality: only compare names"""
         return self.name == other.name
 
     def hasTypeHint(self) -> bool:
-        """Check whether this arg has type hint"""
-        return self.typeHint != ''
+        """
+        Check whether this arg has a type hint. A default value alone, such as
+        ``, default=3``, is not a type hint (see ``isDefaultOnly()``).
+        """
+        return self.typeHint != '' and not isDefaultOnly(self.typeHint)
 
     def isStarArg(self) -> bool:
         """Check whether this arg is a star arg (such as *args, **kwargs)"""
@@ -171,6 +187,9 @@ class Arg:
         ``Arg.typeHint`` for existing DOC105/DOC605 comparisons. Fall back to
         ``type_name`` for parser outputs without ``raw_type_name``.
         """
+        # TODO: Normalize other ways of writing a default here, such as
+        #  `default: 3` into `, default=3`. See:
+        #  https://github.com/jsh9/pydoclint/issues/336
         rawTypeName = getattr(docstringArg, 'raw_type_name', None)
         if rawTypeName is not None:
             return cls._str(rawTypeName)
@@ -189,6 +208,11 @@ class Arg:
         # >>>     "def",
         # >>>     "ghi",
         # >>> ]
+        # TODO: A default-only hint such as `, default=1e-05` doesn't parse,
+        #  so it is compared as raw text, and it isn't equal to
+        #  `, default=0.00001`. Compare such defaults with
+        #  defaultValuesEqual() instead. See:
+        #  https://github.com/jsh9/pydoclint/issues/337
         try:
             hint1_: str = unparseName(ast.parse(stripQuotes(hint1)))
         except SyntaxError:
@@ -428,6 +452,24 @@ class ArgList:
                 result.append(selfArg)
 
         return result
+
+    def findArgsWithDifferentDefaults(self, other: ArgList) -> list[Arg]:
+        """
+        Find args whose default values (such as ``3`` in ``int, default=3``)
+        don't match those in ``other``. The types are not compared.
+        """
+        if not self.equals(other, checkTypeHint=False, orderMatters=False):
+            msg = 'These 2 arg lists do not have the same arg names'
+            raise EdgeCaseError(msg)
+
+        return [
+            selfArg
+            for selfArg in self.infoList
+            if not defaultValuesEqual(
+                getDefaultValue(selfArg.typeHint),
+                getDefaultValue(other.lookup[selfArg.name]),
+            )
+        ]
 
     def subtract(
             self,
